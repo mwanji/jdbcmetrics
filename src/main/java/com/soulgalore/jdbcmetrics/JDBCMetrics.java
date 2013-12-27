@@ -23,6 +23,8 @@ package com.soulgalore.jdbcmetrics;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.MetricRegistry;
@@ -39,6 +41,19 @@ import com.codahale.metrics.Timer;
 public class JDBCMetrics {
 
 	public static final String REGISTRY_PROPERTY_NAME = "com.soulgalore.jdbcmetrics.MetricRegistry";
+
+	private interface MetricGrouper {
+	  Timer getReadTimerForQuery(String sql);
+	}
+
+	private static final MetricGrouper NOOP_METRIC_GROUPER = new MetricGrouper() {
+	  private final Timer readTimer = new Timer();
+
+    @Override
+    public Timer getReadTimerForQuery(String sql) {
+      return readTimer;
+    }
+	};
 
 	private static final String GROUP = "jdbc";
 	private static final String GROUP_POOL = "connectionpool";
@@ -57,30 +72,31 @@ public class JDBCMetrics {
 	private final Timer readTimerPerRequest;
 	private final Timer connectionPoolTimer;
 
+	private final MetricGrouper metricGrouper;
+
 	private static final JDBCMetrics INSTANCE = new JDBCMetrics();
 
-
 	private JDBCMetrics() {
+		Properties properties = new Properties();
+		InputStream propertiesStream = getClass().getResourceAsStream("/jdbcmetrics.properties");
+		if (propertiesStream != null) {
+		  try {
+		    properties.load(propertiesStream);
+
+		  } catch (Exception e) {
+		    throw new RuntimeException(e);
+		  } finally {
+		    try {
+		      propertiesStream.close();
+		    } catch (IOException e) {
+		      // ignore
+		    }
+		  }
+		}
 
 		String propertyValue = System.getProperty(REGISTRY_PROPERTY_NAME);
 		if (propertyValue == null) {
-		  InputStream propertiesStream = getClass().getResourceAsStream("/jdbcmetrics.properties");
-		  if (propertiesStream != null) {
-		    try {
-		      Properties properties = new Properties();
-		      properties.load(propertiesStream);
-
-		      propertyValue = properties.getProperty("metricRegistry.name");
-		    } catch (Exception e) {
-		      throw new RuntimeException(e);
-		    } finally {
-		      try {
-		        propertiesStream.close();
-		      } catch (IOException e) {
-		        // ignore
-		      }
-		    }
-		  }
+		  propertyValue = properties.getProperty("metricRegistry.name");
 		}
 
 		if (propertyValue != null)
@@ -100,12 +116,30 @@ public class JDBCMetrics {
 		 readTimer = registry.timer(createName(GROUP,
 					TYPE_READ, "read-time"));
 
+
+		 if (Boolean.parseBoolean(properties.getProperty("timer.perQuery", Boolean.FALSE.toString()))) {
+		   this.metricGrouper = new MetricGrouper() {
+		     private final ConcurrentMap<String, Timer> timers = new ConcurrentHashMap<String, Timer>();
+
+		     @Override
+		     public Timer getReadTimerForQuery(String sql) {
+		       if (sql != null && !timers.containsKey(sql)) {
+		         timers.put(sql, registry.timer(createName(GROUP, "query", sql)));
+		       }
+
+		       return timers.get(sql);
+		     }
+      };
+		 } else {
+		   this.metricGrouper = NOOP_METRIC_GROUPER;
+		 }
+
 		 writeTimerPerRequest = registry.timer(createName(GROUP,
 					TYPE_WRITE, "write-time-per-request"));
 
 		 readTimerPerRequest = registry.timer(createName(GROUP,
 					TYPE_READ, "read-time-per-request"));
-		 
+
 		 connectionPoolTimer = registry.timer(createName(GROUP_POOL,
 		     TYPE_READ_OR_WRITE, "wait-for-connection"));
 	}
@@ -134,6 +168,10 @@ public class JDBCMetrics {
 
 	public Timer getReadTimer() {
 		return readTimer;
+	}
+
+	public Timer getReadTimer(String sql) {
+	  return metricGrouper.getReadTimerForQuery(sql);
 	}
 
 	public Timer getWaitForConnectionInPool() {

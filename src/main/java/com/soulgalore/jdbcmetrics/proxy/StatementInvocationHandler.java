@@ -1,19 +1,19 @@
 /******************************************************
  * JDBCMetrics
- * 
+ *
  *
  * Copyright (C) 2013 by Magnus Lundberg (http://magnuslundberg.com) & Peter Hedenskog (http://peterhedenskog.com)
  *
  ******************************************************
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in 
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
- * 
+ *
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software distributed under the License is 
- * distributed  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.   
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is
+ * distributed  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and limitations under the License.
  *
  *******************************************************
@@ -43,7 +43,7 @@ public class StatementInvocationHandler implements InvocationHandler {
 
 	private final Statement statement;
 	private final String sql;
-	
+
 	private final Logger logger = LoggerFactory.getLogger(StatementInvocationHandler.class);
 
 	private long nrOfBatchReads = 0;
@@ -64,8 +64,8 @@ public class StatementInvocationHandler implements InvocationHandler {
 			throws Throwable {
 
 		boolean isTouched = true;
-		
-		// TODO we only need to time the onces that executes a query
+
+		// TODO we only need to time the ones that executes a query
 		// this adds a little overhead
 		final long start = System.nanoTime();
 		Object o;
@@ -77,7 +77,7 @@ public class StatementInvocationHandler implements InvocationHandler {
 		final long time =  System.nanoTime() - start;
 
 		if (METHOD_NAME_EXECUTE_QUERY.equals(method.getName())) {
-			readStats(1, time);
+			readStats(1, time, args != null ? args[0].toString() : sql);
 		} else if (METHOD_NAME_EXECUTE_UPDATE.equals(method.getName())) {
 			writeStats(1, time);
 		} else if (METHOD_NAME_EXECUTE.equals(method.getName())) {
@@ -92,7 +92,7 @@ public class StatementInvocationHandler implements InvocationHandler {
 			nrOfBatchReads = 0;
 			nrOfBatchWrites = 0;
 		} else if (METHOD_NAME_EXECUTE_BATCH.equals(method.getName())) {
-			readStats(nrOfBatchReads, time);
+			readStats(nrOfBatchReads, time, sql);
 			writeStats(nrOfBatchWrites, time);
 			nrOfBatchReads = 0;
 			nrOfBatchWrites = 0;
@@ -100,7 +100,7 @@ public class StatementInvocationHandler implements InvocationHandler {
 		else {
 			isTouched = false;
 		}
-		
+
 		if (logger.isDebugEnabled() && isTouched) {
 			logger.debug(method.getName()
 					+ " "
@@ -113,13 +113,13 @@ public class StatementInvocationHandler implements InvocationHandler {
 
 	void incStats(String sql, long time) {
 		if (isRead(sql)) {
-			readStats(1, time);
+			readStats(1, time, sql);
 		} else {
 			writeStats(1, time);
 		}
 	}
 
-	void readStats(long inc, long time) {
+	void readStats(long inc, long time, String sql) {
 		if (inc == 0) {
 			return;
 		}
@@ -128,7 +128,12 @@ public class StatementInvocationHandler implements InvocationHandler {
 		}
 		JDBCMetrics.getInstance().getReadTimer()
 				.update(time / inc, TimeUnit.NANOSECONDS);
-		
+
+		if (sql != null) {
+		  JDBCMetrics.getInstance().getReadTimer(sql)
+		      .update(time / inc, TimeUnit.NANOSECONDS);
+		}
+
 		// TODO how should we handle slow queries? or is the timing enough?
 	}
 

@@ -161,6 +161,15 @@ public class WhenQueryIsExecuted extends AbstractDriverTest {
 	}
 
 
+  @Test
+  public void executeSelectShouldIncreaseReadTimerPerQuery() throws SQLException {
+    long oldValue = JDBCMetrics.getInstance().getReadTimer("SELECT 1").getCount();
+    PreparedStatement pst = connection.prepareStatement("SELECT 1");
+    pst.execute();
+    assertThat(JDBCMetrics.getInstance().getReadTimer("SELECT 1").getCount(), is(oldValue+1));
+  }
+
+
 	@Test
 	public void executeInsertShouldIncreaseWriteTimer() throws SQLException {
 		long oldValue = JDBCMetrics.getInstance().getWriteTimer().getCount();
